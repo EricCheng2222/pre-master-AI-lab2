@@ -29,7 +29,7 @@ transform_set = [
 
 transform = transforms.Compose(
     [
-     transforms.Resize(144),
+     transforms.Resize(224),
      transforms.RandomChoice(transform_set),
      transforms.ToTensor(),
      transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
@@ -73,89 +73,27 @@ testloader = torch.utils.data.DataLoader(testset, **test_params)
 
 import torch.nn as nn
 import torch.nn.functional as F
+import torchvision.models as models
 
-class Net(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.conv1 = nn.Conv2d(3, 128, 3)
-        self.bn1   = nn.BatchNorm2d(128)
-        self.relu1 = nn.LeakyReLU(0.01)
-        self.pool1 = nn.MaxPool2d(2)
+resnet18 = models.resnet18(pretrained=True)
 
-        self.conv2 = nn.Conv2d(128, 64, 3)
-        self.bn2   = nn.BatchNorm2d(64)
-        self.relu2 = nn.LeakyReLU(0.01)
-        self.pool2 = nn.MaxPool2d(2)
-
-        self.conv3 = nn.Conv2d(64, 64, 3)
-        self.bn3   = nn.BatchNorm2d(64)
-        self.relu3 = nn.LeakyReLU(0.01)
-        self.pool3 = nn.MaxPool2d(2)
-
-        self.conv4 = nn.Conv2d(64, 64, 3)
-        self.bn4   = nn.BatchNorm2d(64)
-        self.relu4 = nn.LeakyReLU(0.01)
-        self.pool4 = nn.MaxPool2d(2)
-
-        #self.conv5 = nn.Conv2d(64, 25, 3)
-        #self.bn5   = nn.BatchNorm2d(25)
-        #self.relu5 = nn.LeakyReLU(0.01)
-        #self.pool5 = nn.MaxPool2d(2)
-
-        self.fc1 = nn.Linear(3136, 625)
-        self.relu3 = nn.LeakyReLU(0.01)
-        self.fc2 = nn.Linear(625, 625)
-        self.relu4 = nn.LeakyReLU(0.01)
-        self.fc3 = nn.Linear(625, 11)
-        self.relu5 = nn.LeakyReLU(0.01)
-
-
-    def forward(self, x):
-        y = self.conv1(x)
-        y = self.bn1(y)
-        y = self.relu1(y)
-        y = self.pool1(y)
-        y = self.conv2(y)
-        y = self.bn2(y)
-        y = self.relu2(y)
-        y = self.pool2(y)
-        y = self.conv3(y)
-        y = self.bn3(y)
-        y = self.relu3(y)
-        y = self.pool3(y)
-        y = self.conv4(y)
-        y = self.bn4(y)
-        y = self.relu4(y)
-        y = self.pool4(y)
-        #y = self.conv5(y)
-        #y = self.bn5(y)
-        #y = self.relu5(y)
-        #y = self.pool5(y)
-        #print(y.size())
-        y = y.view(y.shape[0], -1)
-        y = self.fc1(y)
-        y = self.relu3(y)
-        y = self.fc2(y)
-        y = self.relu4(y)
-        y = self.fc3(y)
-        y = self.relu5(y)
-        return y 
 
 def main(argv, argc):
     import os.path
     from os import path
-    EPOCH = 50
+    EPOCH = 25
     PATH = './cifar_net.pth'
-    if False:
+    if True:
         print("Training")
-        net = Net()
-        net.to(device)
+        num_feats = resnet18.fc.in_features
+        resnet18.fc = nn.Linear(num_feats, 11)
+        resetnet18 = resnet18.to(device)
         if(argc>=2 and argv[1]=="--usepth"):
             print("use old network")
-            net.load_state_dict(torch.load(PATH))
+            resnet18.load_state_dict(torch.load(PATH))
         import torch.optim as optim
         criterion = nn.CrossEntropyLoss()
-        optimizer = optim.SGD(net.parameters(), lr=0.0003, momentum=0.9)
+        optimizer = optim.SGD(resnet18.parameters(), lr=0.0005, momentum=0.95)
         for epoch in range(EPOCH):  # loop over the dataset multiple times
             running_loss = 0.0
             for i, data in enumerate(trainloader, 0):
@@ -166,7 +104,7 @@ def main(argv, argc):
                 optimizer.zero_grad()
     
                 # forward + backward + optimize
-                outputs = net(inputs)
+                outputs = resnet18(inputs)
                 loss = criterion(outputs, labels)
                 loss.backward()
                 optimizer.step()
@@ -178,17 +116,18 @@ def main(argv, argc):
                       (epoch + 1, i + 1, running_loss / EPOCH))
                     running_loss = 0.0
         print('Finished Training')
-        torch.save(net.state_dict(), PATH)
+        torch.save(resnet18.state_dict(), PATH)
     
     dataiter = iter(testloader)
     images, labels = dataiter.next()
-    
+    images, labels = images.to(device), labels.to(device) 
     # print images
     #imshow(torchvision.utils.make_grid(images))
     print('GroundTruth: ', ' '.join('%5s' % labels[j] for j in range(1)))
-    net = Net()
-    net.load_state_dict(torch.load(PATH))
-    outputs = net(images)
+    resnet_my = models.resnet18(pretrained=False, num_classes=11)
+    resnet_my = resnet_my.to(device)
+    resnet_my.load_state_dict(torch.load(PATH))
+    outputs = resnet_my(images)
     _, predicted = torch.max(outputs, 1)
     print('Predicted: ', ' '.join('%5s' % predicted[j] for j in range(1)))
     
@@ -197,7 +136,8 @@ def main(argv, argc):
     with torch.no_grad():
         for data in testloader:
             images, labels = data
-            outputs = net(images)
+            images, labels = images.to(device), labels.to(device) 
+            outputs = resnet_my(images)
             _, predicted = torch.max(outputs.data, 1)
             total += labels.size(0)
             correct += (predicted == labels).sum().item()
